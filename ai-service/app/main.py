@@ -19,6 +19,8 @@ from google.genai import types as genai_types
 
 from app.config import settings
 from app.db.connection import check_db_health, get_all_kb_articles, get_db_connection
+from app.rag.pipeline import retrieve_relevant_chunks
+from app.rag.indexer import index_all_articles
 from app.schemas import (
     AnalysisResponse,
     AnalyzeTicketRequest,
@@ -74,20 +76,42 @@ async def analyze_ticket(request: AnalyzeTicketRequest):
     ticket = request.ticket
     logger.info("Analyzing ticket #%d: '%s' [%s / %s]", ticket.id, ticket.title, ticket.category, ticket.priority)
 
-    # 1. Try Gemini generation if API key is present
+    # 1. Retrieve grounded KB runbooks using Hybrid RAG
+    matched_chunks = []
+    matched_article_ids = []
+    try:
+        matched_chunks = retrieve_relevant_chunks(
+            query=f"{ticket.title} {ticket.description}",
+            category=ticket.category,
+            top_k=3,
+        )
+        matched_article_ids = list(dict.fromkeys([c.article_id for c in matched_chunks]))
+    except Exception as ret_err:
+        logger.warning("RAG retrieval before analysis failed: %s", ret_err)
+
+    # 2. Try Gemini generation if API key is present
     if settings.GEMINI_API_KEY:
         try:
             client = genai.Client(api_key=settings.GEMINI_API_KEY)
             models_to_try = [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
 
+            runbooks_text = "\n\n".join(
+                [f"--- Runbook #{c.article_id}: {c.article_title} ---\n{c.content}" for c in matched_chunks]
+            ) if matched_chunks else "No specific runbook matched."
+
+            default_article_ids = matched_article_ids if matched_article_ids else [1, 2]
+
             system_prompt = f"""You are the senior IT Service Desk AI Engineer at DigiPlus.
-Analyze the following technical support ticket and provide an actionable diagnosis and structured resolution.
+Analyze the following technical support ticket and provide an actionable diagnosis and structured resolution. Ground your diagnosis and troubleshooting steps on the retrieved runbooks where applicable.
 
 Ticket to Analyze:
 - Title: {ticket.title}
 - Description: {ticket.description}
 - Category: {ticket.category}
 - Priority: {ticket.priority}
+
+Relevant Knowledge Base Runbooks:
+{runbooks_text}
 
 Respond ONLY with valid JSON in this exact structure:
 {{
@@ -96,7 +120,7 @@ Respond ONLY with valid JSON in this exact structure:
   "suggestedPriority": "{ticket.priority}",
   "possibleCause": "Detailed technical root cause explanation",
   "suggestedSolution": "Step 1: ...\\nStep 2: ...\\nStep 3: ...",
-  "relevantArticleIds": [1, 2],
+  "relevantArticleIds": {default_article_ids},
   "keyTroubleshootingSteps": ["Action step 1", "Action step 2", "Action step 3"],
   "confidence": "high"
 }}"""
@@ -122,7 +146,7 @@ Respond ONLY with valid JSON in this exact structure:
                         suggestedPriority=parsed.get("suggestedPriority", ticket.priority),
                         possibleCause=parsed.get("possibleCause", "Underlying service failure or configuration error."),
                         suggestedSolution=parsed.get("suggestedSolution", "1. Verify logs\n2. Apply runbook\n3. Confirm fix"),
-                        relevantArticleIds=parsed.get("relevantArticleIds", []),
+                        relevantArticleIds=parsed.get("relevantArticleIds") or matched_article_ids or [1, 2],
                         keyTroubleshootingSteps=parsed.get("keyTroubleshootingSteps", ["Inspect error logs", "Verify service connectivity", "Apply standard runbook"]),
                         confidence=parsed.get("confidence", "high"),
                         engine="gemini",
@@ -229,76 +253,49 @@ async def search(
     top_k: int = Query(5, ge=1, le=20, description="Number of results to return"),
 ):
     """
-    Search across knowledge-base runbooks and incident history.
+    Search across knowledge-base runbooks using Hybrid RAG (pgvector + full-text + RRF + Gemini rerank).
     """
     logger.info("Search requested: query='%s', category=%s, top_k=%d", query, category, top_k)
 
-    # Try PostgreSQL full-text search if database is reachable
-    conn = get_db_connection()
-    results: List[SearchResultItem] = []
+    candidates = retrieve_relevant_chunks(
+        query=query,
+        category=category,
+        top_k=top_k,
+    )
 
-    if conn is not None:
-        try:
-            with conn.cursor() as cur:
-                # Basic text search on kb_articles
-                sql = """
-                    SELECT id, title, body, category
-                    FROM kb_articles
-                    WHERE (title ILIKE %s OR body ILIKE %s)
-                """
-                params = [f"%{query}%", f"%{query}%"]
-                if category:
-                    sql += " AND category = %s"
-                    params.append(category)
-                sql += " LIMIT %s;"
-                params.append(top_k)
-
-                cur.execute(sql, params)
-                rows = cur.fetchall()
-                for row in rows:
-                    results.append(
-                        SearchResultItem(
-                            chunk_id=row[0],
-                            article_id=row[0],
-                            title=row[1],
-                            content=row[2][:300] + "...",
-                            score=0.85,
-                            source_type="kb",
-                        )
-                    )
-        except Exception as e:
-            logger.warning("Postgres search error: %s", e)
-        finally:
-            conn.close()
-
-    # Fallback to in-memory seed sample search if DB returned 0 or is disconnected
-    if not results:
-        results.append(
-            SearchResultItem(
-                chunk_id=1,
-                article_id=1,
-                title="GlobalProtect / AnyConnect SSL VPN Tunnel Gateway Connection Timeouts",
-                content="Resolve corporate VPN gateway timeouts, certificate mismatches, and MFA push notification failures.",
-                score=0.80,
-                source_type="kb",
-            )
+    results: List[SearchResultItem] = [
+        SearchResultItem(
+            chunk_id=c.chunk_id,
+            article_id=c.article_id,
+            title=c.article_title,
+            category=c.category,
+            chunk_index=c.chunk_index,
+            content=c.content,
+            score=c.score,
+            method=c.method,
+            rank=c.rank,
+            source_type="kb",
         )
+        for c in candidates
+    ]
 
     return SearchResponse(
         query=query,
+        category=category,
         count=len(results),
         results=results,
+        use_hybrid=settings.USE_HYBRID,
+        use_rerank=settings.USE_RERANK,
     )
 
 
 @app.post("/index", response_model=IndexResponse)
 async def index_data(request: IndexRequest):
     """
-    Indexes knowledge-base articles and ticket embeddings into PostgreSQL pgvector.
+    Indexes knowledge-base articles and chunks with embeddings into PostgreSQL pgvector.
     """
     logger.info("Indexing requested (reindex_all=%s)", request.reindex_all)
 
-    # In Phase 1: Verify database connection and report readiness for Phase 2 chunking
     conn = get_db_connection()
     if conn is None:
         return IndexResponse(
@@ -306,33 +303,31 @@ async def index_data(request: IndexRequest):
             articles_indexed=0,
             chunks_created=0,
             tickets_indexed=0,
-            message="PostgreSQL database offline. Please start Docker Compose or supply DATABASE_URL.",
+            message="PostgreSQL database offline. Please configure DATABASE_URL in .env.local",
         )
 
     try:
+        index_result = index_all_articles(conn=conn)
+
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM kb_articles;")
-            kb_count = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM tickets;")
             ticket_count = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM kb_chunks;")
-            chunk_count = cur.fetchone()[0]
 
         return IndexResponse(
             success=True,
-            articles_indexed=kb_count,
-            chunks_created=chunk_count,
+            articles_indexed=index_result["articles_indexed"],
+            chunks_created=index_result["chunks_created"],
             tickets_indexed=ticket_count,
-            message=f"PostgreSQL active with {kb_count} articles and {ticket_count} tickets.",
+            message=f"Successfully indexed {index_result['articles_indexed']} articles into {index_result['chunks_created']} chunks in {index_result['duration_seconds']}s.",
         )
     except Exception as e:
-        logger.error("Error checking index counts: %s", e)
+        logger.error("Error during indexing: %s", e)
         return IndexResponse(
             success=False,
             articles_indexed=0,
             chunks_created=0,
             tickets_indexed=0,
-            message=f"Database query error: {str(e)}",
+            message=f"Indexing error: {str(e)}",
         )
     finally:
         conn.close()

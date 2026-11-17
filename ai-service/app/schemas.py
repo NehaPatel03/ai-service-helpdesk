@@ -52,15 +52,22 @@ class SearchResultItem(BaseModel):
     chunk_id: int
     article_id: int
     title: str
+    category: str = "General"
+    chunk_index: int = 0
     content: str
     score: float
+    method: str = "hybrid"
+    rank: Optional[int] = None
     source_type: str = "kb"
 
 
 class SearchResponse(BaseModel):
     query: str
+    category: Optional[str] = None
     count: int
     results: List[SearchResultItem]
+    use_hybrid: bool = True
+    use_rerank: bool = True
 
 
 # ==============================================================================
