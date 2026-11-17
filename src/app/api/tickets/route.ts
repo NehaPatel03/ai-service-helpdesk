@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAllTickets, createTicket } from '@/lib/db';
+import { isPostgresAvailable, pgGetAllTickets, pgCreateTicket } from '@/lib/postgres';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,12 @@ export async function GET(request: Request) {
     const category = searchParams.get('category') || undefined;
     const search = searchParams.get('search') || undefined;
 
-    const tickets = getAllTickets({ status, priority, category, search });
+    let tickets;
+    if (await isPostgresAvailable()) {
+      tickets = await pgGetAllTickets({ status, priority, category, search });
+    } else {
+      tickets = getAllTickets({ status, priority, category, search });
+    }
     return NextResponse.json({ success: true, count: tickets.length, data: tickets });
   } catch (error: any) {
     console.error('Failed to get tickets:', error);
@@ -30,12 +36,22 @@ export async function POST(request: Request) {
       );
     }
 
-    const newTicket = createTicket({
-      title: body.title.trim(),
-      description: body.description.trim(),
-      priority: body.priority,
-      category: body.category,
-    });
+    let newTicket;
+    if (await isPostgresAvailable()) {
+      newTicket = await pgCreateTicket({
+        title: body.title.trim(),
+        description: body.description.trim(),
+        priority: body.priority,
+        category: body.category,
+      });
+    } else {
+      newTicket = createTicket({
+        title: body.title.trim(),
+        description: body.description.trim(),
+        priority: body.priority,
+        category: body.category,
+      });
+    }
 
     return NextResponse.json({ success: true, data: newTicket }, { status: 201 });
   } catch (error: any) {

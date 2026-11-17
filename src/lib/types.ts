@@ -47,6 +47,8 @@ export interface AIAnalysisResult {
   suggestedSolution: string;
   relevantArticleIds: number[];
   keyTroubleshootingSteps: string[];
+  confidence?: 'low' | 'medium' | 'high';
+  engine?: 'gemini' | 'heuristic_fallback';
 }
 
 export interface DashboardStats {
