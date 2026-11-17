@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import { Ticket, KnowledgeArticle, TicketPriority, TicketCategory, TicketStatus } from './types';
+import { Ticket, KnowledgeArticle, TicketPriority, TicketCategory, TicketStatus, TicketChatMessage } from './types';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -40,6 +40,8 @@ function getDatabase(): Database.Database {
       ai_solution TEXT,
       ai_suggested_category TEXT,
       ai_suggested_priority TEXT,
+      source TEXT DEFAULT 'manual',
+      external_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -53,7 +55,42 @@ function getDatabase(): Database.Database {
       tags TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS ticket_embeddings (
+      ticket_id INTEGER PRIMARY KEY,
+      embedding_json TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS ticket_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL,
+      sender TEXT NOT NULL,
+      message TEXT NOT NULL,
+      is_fallback BOOLEAN DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id);
   `);
+
+  // Safe incremental migrations for existing databases
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(tickets)").all() as Array<{ name: string }>;
+    const columnNames = tableInfo.map(col => col.name);
+    if (!columnNames.includes('source')) {
+      db.exec("ALTER TABLE tickets ADD COLUMN source TEXT DEFAULT 'manual'");
+    }
+    if (!columnNames.includes('external_id')) {
+      db.exec("ALTER TABLE tickets ADD COLUMN external_id TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_tickets_external_id ON tickets(external_id)");
+    }
+  } catch (migErr) {
+    console.error('Migration warning (tickets columns):', migErr);
+  }
 
   seedInitialData(db);
 
@@ -305,22 +342,38 @@ export function getTicketById(id: number): Ticket | null {
   return ticket || null;
 }
 
+export function getTicketByExternalId(externalId: string): Ticket | null {
+  const db = getDatabase();
+  const ticket = db.prepare('SELECT * FROM tickets WHERE external_id = ?').get(externalId) as Ticket | undefined;
+  return ticket || null;
+}
+
 export function createTicket(data: {
   title: string;
   description: string;
   priority?: TicketPriority;
   category?: TicketCategory;
+  status?: TicketStatus;
+  resolution?: string | null;
+  source?: string;
+  external_id?: string | null;
+  created_at?: string;
 }): Ticket {
   const db = getDatabase();
   const stmt = db.prepare(`
-    INSERT INTO tickets (title, description, priority, category, status)
-    VALUES (?, ?, ?, ?, 'Open')
+    INSERT INTO tickets (title, description, priority, category, status, resolution, source, external_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
   `);
   const info = stmt.run(
     data.title,
     data.description,
     data.priority || 'Medium',
-    data.category || 'Other'
+    data.category || 'Other',
+    data.status || 'Open',
+    data.resolution || null,
+    data.source || 'manual',
+    data.external_id || null,
+    data.created_at || null
   );
   return getTicketById(Number(info.lastInsertRowid))!;
 }
@@ -339,6 +392,8 @@ export function updateTicket(
     ai_solution: string | null;
     ai_suggested_category: string | null;
     ai_suggested_priority: string | null;
+    source: string;
+    external_id: string | null;
   }>
 ): Ticket | null {
   const db = getDatabase();
@@ -353,7 +408,9 @@ export function updateTicket(
     'ai_cause',
     'ai_solution',
     'ai_suggested_category',
-    'ai_suggested_priority'
+    'ai_suggested_priority',
+    'source',
+    'external_id'
   ];
 
   const setClauses: string[] = [];
@@ -484,4 +541,124 @@ export function getDashboardStats() {
     priorityBreakdown: priorityCounts,
     categoryBreakdown: categoryCounts
   };
+}
+
+// Batch import support dataset records with duplicate avoidance
+export function importTicketsBatch(records: Array<{
+  title: string;
+  description: string;
+  priority: TicketPriority;
+  category: TicketCategory;
+  status: TicketStatus;
+  resolution?: string | null;
+  external_id: string;
+  source: string;
+  created_at?: string;
+}>): { imported: Ticket[]; skippedCount: number } {
+  const db = getDatabase();
+  const checkStmt = db.prepare('SELECT id FROM tickets WHERE external_id = ?');
+  const insertStmt = db.prepare(`
+    INSERT INTO tickets (title, description, priority, category, status, resolution, source, external_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+  `);
+
+  const imported: Ticket[] = [];
+  let skippedCount = 0;
+
+  const runTransaction = db.transaction((items: typeof records) => {
+    for (const item of items) {
+      const existing = checkStmt.get(item.external_id);
+      if (existing) {
+        skippedCount++;
+        continue;
+      }
+      const info = insertStmt.run(
+        item.title,
+        item.description,
+        item.priority,
+        item.category,
+        item.status,
+        item.resolution || null,
+        item.source,
+        item.external_id,
+        item.created_at || null
+      );
+      const insertedTicket = getTicketById(Number(info.lastInsertRowid));
+      if (insertedTicket) {
+        imported.push(insertedTicket);
+      }
+    }
+  });
+
+  runTransaction(records);
+  return { imported, skippedCount };
+}
+
+// Ticket Embeddings for Semantic Similarity
+export function saveTicketEmbedding(ticketId: number, embedding: number[], contentHash: string): void {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    INSERT INTO ticket_embeddings (ticket_id, embedding_json, content_hash, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(ticket_id) DO UPDATE SET
+      embedding_json = excluded.embedding_json,
+      content_hash = excluded.content_hash,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  stmt.run(ticketId, JSON.stringify(embedding), contentHash);
+}
+
+export function getTicketEmbedding(ticketId: number): { embedding: number[]; contentHash: string } | null {
+  const db = getDatabase();
+  const row = db.prepare('SELECT embedding_json, content_hash FROM ticket_embeddings WHERE ticket_id = ?').get(ticketId) as any;
+  if (!row) return null;
+  return {
+    embedding: JSON.parse(row.embedding_json || '[]'),
+    contentHash: row.content_hash
+  };
+}
+
+export function getAllTicketEmbeddings(): Array<{ ticket_id: number; embedding: number[]; contentHash: string }> {
+  const db = getDatabase();
+  const rows = db.prepare('SELECT ticket_id, embedding_json, content_hash FROM ticket_embeddings').all() as any[];
+  return rows.map(r => ({
+    ticket_id: r.ticket_id,
+    embedding: JSON.parse(r.embedding_json || '[]'),
+    contentHash: r.content_hash
+  }));
+}
+
+export function deleteTicketEmbedding(ticketId: number): void {
+  const db = getDatabase();
+  db.prepare('DELETE FROM ticket_embeddings WHERE ticket_id = ?').run(ticketId);
+}
+
+// Conversational Chat Messages Storage per Ticket
+export function getTicketMessages(ticketId: number): TicketChatMessage[] {
+  const db = getDatabase();
+  const rows = db.prepare('SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY id ASC').all(ticketId) as any[];
+  return rows.map(r => ({
+    ...r,
+    is_fallback: Boolean(r.is_fallback)
+  }));
+}
+
+export function saveTicketMessage(ticketId: number, sender: 'user' | 'assistant', message: string, isFallback: boolean = false): TicketChatMessage {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    INSERT INTO ticket_messages (ticket_id, sender, message, is_fallback)
+    VALUES (?, ?, ?, ?)
+  `);
+  const info = stmt.run(ticketId, sender, message, isFallback ? 1 : 0);
+  const row = db.prepare('SELECT * FROM ticket_messages WHERE id = ?').get(Number(info.lastInsertRowid)) as any;
+  return {
+    ...row,
+    is_fallback: Boolean(row.is_fallback)
+  };
+}
+
+export function clearTicketMessages(ticketId: number): boolean {
+  const db = getDatabase();
+  const res = db.prepare('DELETE FROM ticket_messages WHERE ticket_id = ?').run(ticketId);
+  return res.changes >= 0;
 }

@@ -13,11 +13,13 @@ import {
   AlertCircle, 
   RotateCcw,
   ArrowUpDown,
-  Bot
+  Bot,
+  DownloadCloud
 } from 'lucide-react';
 import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '@/lib/types';
 import { StatusBadge, PriorityBadge, CategoryBadge } from '@/components/Badges';
 import { CreateTicketModal } from '@/components/CreateTicketModal';
+import { DatasetImportModal } from '@/components/DatasetImportModal';
 
 const STATUS_TABS: { label: string; value: string; emoji: string }[] = [
   { label: 'All', value: 'All', emoji: '📁' },
@@ -48,6 +50,7 @@ export default function TicketsPage() {
   const [priorityFilter, setPriorityFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const fetchTickets = async () => {
     try {
@@ -96,13 +99,23 @@ export default function TicketsPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all hover:scale-105"
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span>Create Ticket 🎫</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-semibold text-sm border border-slate-700 transition-all shadow"
+          >
+            <DownloadCloud className="w-4 h-4 text-cyan-400" />
+            <span>Import Dataset 📥</span>
+          </button>
+
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all hover:scale-105"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>Create Ticket 🎫</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters and Search Bar */}
@@ -285,6 +298,15 @@ export default function TicketsPage() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onTicketCreated={() => {
+          fetchTickets();
+        }}
+      />
+
+      {/* Hugging Face Dataset Import Modal */}
+      <DatasetImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportSuccess={() => {
           fetchTickets();
         }}
       />

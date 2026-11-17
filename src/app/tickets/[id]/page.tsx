@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { Ticket, TicketStatus, TicketPriority, TicketCategory, KnowledgeArticle, AIAnalysisResult } from '@/lib/types';
 import { StatusBadge, PriorityBadge, CategoryBadge } from '@/components/Badges';
+import { SimilarIncidentsSection } from '@/components/SimilarIncidentsSection';
+import { TicketChatAssistant } from '@/components/TicketChatAssistant';
 
 const ALL_STATUSES: TicketStatus[] = ['Open', 'In Progress', 'Resolved', 'Closed'];
 const ALL_PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
@@ -234,6 +236,12 @@ export default function TicketDetailPage() {
     } catch (err) {
       console.error('Failed to apply AI recommendations:', err);
     }
+  };
+
+  // Apply resolution from a similar historical ticket
+  const handleApplySimilarResolution = (resText: string) => {
+    setResolutionText(resText);
+    showToast('Copied previous resolution notes from similar ticket! 📋');
   };
 
   if (loading) {
@@ -622,6 +630,25 @@ export default function TicketDetailPage() {
 
         </div>
 
+      </div>
+
+      {/* Interactive AI Assistant & Similar Incidents Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+        {/* Left: Similar Incidents Section 🔍 */}
+        <div>
+          <SimilarIncidentsSection 
+            ticketId={ticket.id} 
+            onApplyResolution={handleApplySimilarResolution}
+          />
+        </div>
+
+        {/* Right: Conversational AI Support Assistant 🤖 */}
+        <div>
+          <TicketChatAssistant 
+            ticketId={ticket.id} 
+            ticketTitle={ticket.title} 
+          />
+        </div>
       </div>
     </div>
   );
