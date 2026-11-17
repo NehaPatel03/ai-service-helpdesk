@@ -35,6 +35,24 @@ A clean, modern, and intelligent IT Service Desk web application built for the *
 - Data remains available after refreshing or restarting the application.
 - Includes sample incidents and support guides.
 
+### 6. Curated Seed Datasets & Evaluation Harness (Phase 0)
+- **Dataset Notice:** The seed datasets and evaluation golden sets are **synthetic, production-style curated IT helpdesk datasets** designed for benchmarking retrieval precision and LLM incident resolution.
+- **`data/seed/kb_articles.jsonl`**: 40 canonical technical runbooks covering 8 key categories (`network`, `email`, `VPN and access`, `hardware`, `software installation`, `account and password`, `database`, `performance`).
+- **`data/seed/tickets.jsonl`**: 300 realistic historical incident tickets with verified resolutions and category mappings.
+- **`eval/golden_set.jsonl`**: 60 held-out evaluation tickets strictly excluded from the searchable index to avoid benchmark contamination.
+- **Regenerate Seed Datasets:**
+  ```bash
+  python scripts/generate_seed_data.py --seed 42
+  ```
+- **Load Seed Datasets:**
+  ```bash
+  python scripts/load_seed.py --db-type sqlite
+  ```
+- **Run Dataset Unit Tests:**
+  ```bash
+  python -m pytest tests/test_seed_data.py -v
+  ```
+
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
