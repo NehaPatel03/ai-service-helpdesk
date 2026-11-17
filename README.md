@@ -1,97 +1,80 @@
 # DigiPlus AI-Powered Service Desk 🤖🎫
 
-A clean, modern, and intelligent IT Service Desk web application built for the **DigiPlus Technical Assessment**. The application assists support engineers in triaging natural language incident descriptions, generating automated AI root-cause diagnostics, matching relevant technical knowledge-base runbooks, and recording incident resolutions with persistent SQLite storage.
+A production-grade, full-stack IT Service Desk and automated incident remediation system upgraded with **Neon Serverless PostgreSQL**, **`pgvector` dense vector embeddings**, **PostgreSQL full-text search**, a **FastAPI AI microservice**, and **Google Gemini (Generative AI & Embeddings)**.
+
+The system empowers IT support engineers by triaging natural language incidents, calculating automated root-cause diagnostics, searching runbooks with **Hybrid RAG (Dense Vector + Full-Text + RRF + Neural Reranking)**, and tracking the complete incident resolution lifecycle.
 
 ---
 
-## 🌟 Key Features
+## 🌟 Upgraded Architecture Overview
 
-## Main Features
+```
+                      +-----------------------------------+
+                      |   Next.js 16 Full-Stack Web App   |
+                      |   (React 19, TypeScript, Tailwind)|
+                      +--------+-----------------+--------+
+                               |                 |
+                   Next.js API |                 | Fast REST Calls
+                      Routes   |                 |
+                               v                 v
+            +--------------------+    +----------------------+
+            | Neon PostgreSQL    |    | FastAPI AI Service   |
+            | - tickets          |    | - Health: /health    |
+            | - kb_articles      |    | - Analyze: /analyze  |
+            | - kb_chunks        |    | - Search: /search    |
+            | - pgvector (768d)  |    | - Index: /index      |
+            | - GIN tsvector     |    +----------+-----------+
+            +--------------------+               |
+                                                 | google-genai
+                                                 v
+                                      +----------------------+
+                                      | Google Gemini API    |
+                                      | - gemini-3.5-flash-lite
+                                      | - gemini-embedding-001
+                                      +----------------------+
+```
 
-### 1. Dashboard
-- Shows total, open, in-progress, and resolved incidents.
-- Displays recent incidents.
-- Shows incident priority and category summaries.
+### Technology Stack
+- **Frontend & Full-Stack Gateway:** Next.js (App Router), React, TypeScript strict mode, Tailwind CSS.
+- **AI Microservice:** Python 3.12, FastAPI, Uvicorn, Pydantic v2 validation.
+- **Database:** Neon hosted Serverless PostgreSQL 18.7 with native `pgvector` 0.8.7.
+- **Vector Search:** `pgvector` HNSW index with cosine distance (`<=>`).
+- **Full-Text Search:** PostgreSQL `tsvector` with inverted GIN index and `ts_rank_cd`.
+- **Large Language Model:** Google Gemini (`gemini-3.5-flash-lite`, with fallback to `gemini-3.1-flash-lite` / `gemini-3.8-flash`).
+- **Embedding Model:** `gemini-embedding-001` pinned to `EMBED_DIM=768` (`output_dimensionality=768`).
+- **Legacy Storage:** SQLite (`data/support_desk.db`) preserved with automatic migration to PostgreSQL.
 
-### 2. Ticket Management
-- Create tickets with title, description, priority, and category.
-- Search and filter tickets.
-- Move tickets through Open, In Progress, Resolved, and Closed.
-- Add root cause and resolution details.
+---
 
-### 3. AI Incident Analysis
-- Analyze incidents using Google Gemini.
-- Generates a short summary, possible root cause, and suggested solution.
-- Recommends the appropriate priority and category.
-- Allows AI-generated solutions to be copied into the resolution notes.
+## 📋 Implementation Progress & Completed Phases
 
-### 4. Knowledge Base
-- Includes support guides for common technical issues.
-- Shows relevant guides based on the incident.
-- Allows engineers to view and copy troubleshooting steps.
-
-### 5. Data Storage
-- Uses SQLite to store incidents and knowledge-base data.
-- Data remains available after refreshing or restarting the application.
-- Includes sample incidents and support guides.
-
-### 6. Curated Seed Datasets & Evaluation Harness (Phase 0)
-- **Dataset Notice:** The seed datasets and evaluation golden sets are **synthetic, production-style curated IT helpdesk datasets** designed for benchmarking retrieval precision and LLM incident resolution.
-- **`data/seed/kb_articles.jsonl`**: 40 canonical technical runbooks covering 8 key categories (`network`, `email`, `VPN and access`, `hardware`, `software installation`, `account and password`, `database`, `performance`).
+### Phase 0: Synthetic IT Helpdesk Datasets & Evaluation Benchmark
+- **`data/seed/kb_articles.jsonl`**: 40 canonical technical runbooks spanning 8 core IT categories (`network`, `email`, `VPN and access`, `hardware`, `software installation`, `account and password`, `database`, `performance`).
 - **`data/seed/tickets.jsonl`**: 300 realistic historical incident tickets with verified resolutions and category mappings.
-- **`eval/golden_set.jsonl`**: 60 held-out evaluation tickets strictly excluded from the searchable index to avoid benchmark contamination.
-- **Regenerate Seed Datasets:**
+- **`eval/golden_set.jsonl`**: 60 held-out evaluation tickets strictly isolated from the searchable index to ensure clean, uncontaminated benchmarking.
+- **Data Generator & Loader:**
   ```bash
   python scripts/generate_seed_data.py --seed 42
-  ```
-- **Load Seed Datasets:**
-  ```bash
   python scripts/load_seed.py --db-type sqlite
-  ```
-- **Run Dataset Unit Tests:**
-  ```bash
   python -m pytest tests/test_seed_data.py -v
   ```
 
-## 🚀 Quick Start Guide
+---
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+ or v20+ / v22+ recommended)
-- `npm` (bundled with Node.js)
+### Phase 1: Neon PostgreSQL, `pgvector`, FastAPI & SQLite Migration
+- **Neon Hosted Database:** Configured without requiring Docker Desktop, saving host disk space.
+- **pgvector Extension:** Enabled `vector` extension version `0.8.7` on PostgreSQL 18.7.
+- **Database Schema Migration:** [`db/migrations/001_initial_schema.sql`](file:///d:/ai-service-desk/digiplus-ai-service-desk/db/migrations/001_initial_schema.sql) defining `kb_articles`, `kb_chunks`, `tickets`, `agent_runs`, and `feedback`.
+- **Data Migration:** [`scripts/migrate_sqlite_to_postgres.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/scripts/migrate_sqlite_to_postgres.py) migrated existing tickets and KB articles with 100% parity, sequence resets, and SQLite backup preservation (`data/support_desk.db.backup`).
+- **FastAPI AI Microservice:** Implemented in `ai-service/` with endpoints:
+  - `GET /health`: Database connection status, vector extension verification, model constants.
+  - `POST /analyze-ticket`: Structured incident diagnosis, root cause analysis, and remediation steps.
+- **DNS Resilience:** Integrated resilient DNS resolution via `dnspython` and Node.js custom TLS SNI to bypass restrictive local ISP DNS filters.
 
-### 1. Install Dependencies
-```bash
-npm install
-```
+---
 
-### 2. Configure AI API Key (Optional)
-Copy the example environment file:
-```bash
-cp .env.example .env.local
-```
-
-Edit `.env.local` and add your **Google Gemini API Key**:
-```env
-GEMINI_API_KEY=your_google_gemini_api_key_here
-```
-> 💡 *Note: If no API key is provided, the application automatically uses an intelligent built-in heuristic diagnostic engine matching HuggingFace help-desk datasets, so the application remains 100% functional out-of-the-box.*
-
-### 3. Run the Development Server
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### 4. Production Build & Test
-```bash
-npm run build
-npm run start
-```
-
-## 🧠 Phase 2: Hybrid Retrieval (Hybrid RAG) Architecture
-
-The DigiPlus AI Service Desk implements a state-of-the-art **Hybrid RAG** retrieval pipeline combining dense vector embeddings, sparse full-text search, Reciprocal Rank Fusion (RRF), and Gemini neural reranking.
+### Phase 2: Hybrid Retrieval (Hybrid RAG) Engine
+Combines dense vector embeddings, sparse full-text search, Reciprocal Rank Fusion (RRF), and Gemini neural reranking:
 
 ```
                            +----------------------+
@@ -123,80 +106,142 @@ The DigiPlus AI Service Desk implements a state-of-the-art **Hybrid RAG** retrie
                           Top 5 Grounded Runbooks
 ```
 
-### 1. Knowledge Base Chunking Strategy
-- **Chunk Size:** 300–500 tokens (~1200–2000 characters) preserving paragraph, line, and markdown sentence boundaries.
-- **Overlap:** 50–100 tokens (~200–400 characters) to maintain continuity across boundary cuts.
-- **Context Grounding:** Every chunk prepends a header `[{category}] {title}` to preserve contextual semantics during embedding generation.
-- **Idempotency:** Short runbooks fitting within the target size are kept intact as a single chunk without unnecessary splitting.
+#### 1. Knowledge Base Chunking Strategy ([`ai-service/app/rag/chunker.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/chunker.py))
+- **Chunk Size:** 300–500 tokens (~1200–2000 characters), splitting at natural markdown section and paragraph boundaries.
+- **Overlap:** 50–100 tokens (~200–400 characters) to preserve technical context across boundary cuts.
+- **Context Grounding:** Every chunk prepends a metadata header `[{category}] {title}` to maximize vector retrieval accuracy.
+- **Idempotency:** Short articles within the target threshold are stored as a single chunk without unnecessary splitting.
 
-### 2. Embedding Model & Vector Similarity
-- **Model:** `gemini-embedding-001` via the official Google GenAI SDK.
-- **Dimensions:** Pinned to `EMBED_DIM=768` (`output_dimensionality=768`), matching the PostgreSQL `vector(768)` column.
-- **Vector Index:** PostgreSQL pgvector index using HNSW with cosine distance (`<=>`).
-- **Cosine Similarity:** Calculated as `1.0 - (c.embedding <=> query_vector::vector)`.
+#### 2. Dense Vector Embeddings ([`ai-service/app/rag/embeddings.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/embeddings.py))
+- **Model:** `gemini-embedding-001` via the official `google-genai` SDK.
+- **Dimensions:** Strict constant `EMBED_DIM=768` (`output_dimensionality=768`), validated before database insertion.
+- **Reliability:** Built-in batching, exponential backoff (`1s, 2s, 4s`), and rate-limit recovery.
 
-### 3. PostgreSQL Full-Text Search
-- **Column:** Generated `tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`.
-- **Index:** Inverted GIN index `kb_chunks_tsv_idx ON kb_chunks USING gin (tsv)`.
-- **Ranking:** `ts_rank_cd(c.tsv, query)` using `plainto_tsquery('english', query)` with substring ILIKE fallback for punctuation-heavy strings.
+#### 3. Idempotent Indexing ([`scripts/index_kb.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/scripts/index_kb.py))
+- Chunks articles from `kb_articles`, generates Gemini embeddings, and populates `kb_chunks`.
+- Deletes prior chunks for an article before re-indexing to prevent duplicate or orphaned chunks.
 
-### 4. Reciprocal Rank Fusion (RRF)
-RRF merges disparate score distributions from dense vector search and sparse full-text search without requiring score calibration:
+#### 4. Semantic Vector Search & Full-Text Search ([`ai-service/app/rag/retriever.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/retriever.py))
+- **Cosine Distance:** `1.0 - (c.embedding <=> query_vector::vector)` over pgvector HNSW index.
+- **Keyword Search:** `ts_rank_cd(c.tsv, query)` against PostgreSQL `tsvector` with GIN indexing.
+- **Category Filtering:** Supports technical category filters (`Network`, `Database`, etc.).
+
+#### 5. Reciprocal Rank Fusion (RRF)
+Fuses dense vector and sparse keyword rankings without mixing incompatible score distributions:
 $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{vector}, \text{text}\}} \frac{1.0}{k + \text{rank}_m(d)}$$
 - **Default Smoothing Constant:** $k = 60$.
-- **Deduplication:** Automatic deduplication by `chunk_id` while merging ranking metadata.
+- Deduplicates results by `chunk_id` and sorts in descending order.
 
-### 5. Gemini Neural Reranking
-- **Model:** `gemini-3.5-flash-lite` (with automatic fallback to `gemini-3.1-flash-lite`).
-- **Input:** Query + Top 20 RRF candidate chunks.
-- **Output:** Structured JSON ranking with relevance scores (0.0 to 1.0) and technical reasoning.
-- **Strict Safeguards:** 
-  - Validates all returned `chunk_id`s against the candidate pool; strictly drops hallucinated IDs.
-  - Automatically falls back to RRF ranking if Gemini response is malformed, rate-limited, or unavailable.
+#### 6. Gemini Neural Reranking ([`ai-service/app/rag/reranker.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/reranker.py))
+- Evaluates Top 20 RRF candidates using `gemini-3.5-flash-lite`.
+- Generates structured relevance scores (0.0 to 1.0) and technical reasoning.
+- **Strict Safeguards:** Drops hallucinated/invented chunk IDs and automatically falls back to RRF candidate order on malformed JSON or API errors.
 
-### 6. Feature Flags
-
-Configured in `.env.local` or environment variables:
+#### 7. Feature Flag Matrix ([`ai-service/app/rag/pipeline.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/pipeline.py))
 
 | `USE_HYBRID` | `USE_RERANK` | Active Retrieval Pipeline |
 |---|---|---|
-| `false` | `false` | Basic PostgreSQL full-text keyword retrieval |
+| `false` | `false` | Basic PostgreSQL full-text search (`tsvector`) |
 | `true` | `false` | Dense vector + sparse full-text search fused with RRF |
 | `true` | `true` | Hybrid search + RRF + Gemini neural reranking (default) |
 
-### 7. How to Index and Re-Index Knowledge Base Articles
+---
 
-Run the reusable indexing CLI script:
+## ⚙️ Environment Variables Reference
+
+Configure these in your local `.env.local` file (git-ignored, never committed):
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://...` | Neon PostgreSQL connection string with `?sslmode=require` |
+| `GEMINI_API_KEY` | *(Secret)* | Google Gemini API Key from Google AI Studio |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Primary LLM model for analysis and reranking |
+| `EMBED_MODEL` | `gemini-embedding-001` | Embedding model for dense vector search |
+| `EMBED_DIM` | `768` | Vector dimension matching pgvector column |
+| `AI_SERVICE_URL` | `http://localhost:8000` | URL where the FastAPI service is listening |
+| `USE_HYBRID` | `true` | Enables vector + full-text RRF search |
+| `USE_RERANK` | `true` | Enables Gemini neural reranking on top RRF candidates |
+
+---
+
+## 🚀 Step-by-Step Setup & Execution
+
+### 1. Install Node.js & Python Dependencies
 ```bash
-python scripts/index_kb.py --batch-size 10
+# Node.js dependencies
+npm install
+
+# Python AI Service dependencies
+pip install -r ai-service/requirements.txt
 ```
-Or trigger via the FastAPI AI service endpoint:
-```bash
-curl -X POST http://127.0.0.1:8000/index -H "Content-Type: application/json" -d '{"reindex_all": true}'
+
+### 2. Configure Environment (`.env.local`)
+Create or edit `.env.local`:
+```env
+# Google Gemini API
+GEMINI_API_KEY=your_actual_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
+EMBED_MODEL=gemini-embedding-001
+EMBED_DIM=768
+
+# Database (Neon PostgreSQL)
+DATABASE_URL=postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require
+
+# AI Service & Feature Flags
+AI_SERVICE_URL=http://localhost:8000
+USE_HYBRID=true
+USE_RERANK=true
 ```
 
-### 8. Running the Complete Test Suite
+### 3. Run Knowledge Base Indexing
+To chunk and embed all runbooks into Neon `pgvector`:
+```bash
+python scripts/index_kb.py
+```
+
+### 4. Start the Application Servers
+Open two terminal windows:
+
+**Terminal 1 — FastAPI AI Microservice:**
+```bash
+python -m uvicorn app.main:app --app-dir ai-service --host 127.0.0.1 --port 8000
+```
+
+**Terminal 2 — Next.js Full-Stack Application:**
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## 🧪 Comprehensive Automated Testing
+
+The project includes an extensive test suite verifying Python services, Next.js type safety, and full-stack incident workflows:
 
 ```bash
-# 1. Run all Python unit and integration tests (Chunking, RAG, API, Seed data):
+# 1. Run all Python unit and integration tests (Chunker, RAG, API, Seed data):
 $env:PYTHONPATH="ai-service"; python -m pytest ai-service/tests/ tests/test_seed_data.py -v
 
 # 2. Run TypeScript strict type-check:
 npx tsc --noEmit
 
-# 3. Run full-stack End-to-End verification:
+# 3. Run full-stack End-to-End incident lifecycle verification:
 node test-e2e.mjs
 ```
 
----
-
-## 🧪 Automated End-to-End Testing
-
-To run the automated verification script testing the entire incident lifecycle (Ticket Creation ➡️ AI Analysis ➡️ Runbook Matching ➡️ Resolution ➡️ Dashboard Stats):
-
-```bash
-node test-e2e.mjs
-```
+### Test Suite Breakdown:
+- **`ai-service/tests/test_chunker.py` (6 tests):** Short/long article splitting, context overlap, duplicate prevention, metadata preservation.
+- **`ai-service/tests/test_rag.py` (12 tests):** RRF formula accuracy, embedding dimension checks, reranker hallucination drop guards, fallback mechanisms, and feature flag routing.
+- **`ai-service/tests/test_api.py` (8 tests):** FastAPI `/health`, `/analyze-ticket`, `/search`, `/index` schema conformity and input validation.
+- **`tests/test_seed_data.py` (9 tests):** Seed datasets, schema coverage, category coverage, and golden set benchmark isolation.
+- **`test-e2e.mjs` (11 suites):** End-to-end verification of ticket creation, AI analysis, runbook matching, ticket resolution, dataset batch import, semantic duplicate detection, conversational AI assistant, and dashboard recalculation.
 
 ---
 
+## 🔒 Security & Best Practices
+- **No Hardcoded Secrets:** All API keys, database URLs, and passwords reside exclusively in `.env.local` and environment variables.
+- **Git Protection:** `.env*` files (except `.env.example`), `.backup` files, and database binaries are strictly ignored in `.gitignore`.
+- **Hallucination Safeguards:** Gemini reranker strictly verifies returned IDs against input candidate lists; invented IDs are systematically discarded.
+- **Resilient Fallback:** The application maintains 100% operational availability through heuristic fallback layers in the event of external network interruptions.
