@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getTicketById } from '@/lib/db';
+import { isPostgresAvailable, pgGetTicketById } from '@/lib/postgres';
 import { findSimilarIncidents } from '@/lib/similarity';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,8 @@ export async function GET(
       );
     }
 
-    const ticket = getTicketById(ticketId);
+    const usePg = await isPostgresAvailable();
+    const ticket = usePg ? await pgGetTicketById(ticketId) : getTicketById(ticketId);
     if (!ticket) {
       return NextResponse.json(
         { success: false, error: 'Ticket not found.' },

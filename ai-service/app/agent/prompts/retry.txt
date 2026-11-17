@@ -1,0 +1,19 @@
+Your previous response did not conform to the required Analysis JSON schema.
+
+Validation Error(s):
+{error_message}
+
+Previous Response:
+{previous_response}
+
+Please correct the format immediately. Output ONLY valid JSON adhering strictly to:
+{
+  "root_cause": "Detailed technical root cause",
+  "confidence": "low" | "medium" | "high",
+  "suggested_steps": ["Step 1", "Step 2", "Step 3"],
+  "related_ticket_ids": [integer IDs from tool results],
+  "kb_sources": [integer IDs from tool results]
+}
+Ensure confidence is exactly one of "low", "medium", or "high".
+Ensure related_ticket_ids and kb_sources are lists of integers.
+Do not wrap in markdown quotes if possible, output pure JSON.

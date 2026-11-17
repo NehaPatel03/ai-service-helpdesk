@@ -645,6 +645,13 @@ export function getTicketMessages(ticketId: number): TicketChatMessage[] {
 
 export function saveTicketMessage(ticketId: number, sender: 'user' | 'assistant', message: string, isFallback: boolean = false): TicketChatMessage {
   const db = getDatabase();
+  const ticketExists = db.prepare('SELECT 1 FROM tickets WHERE id = ?').get(ticketId);
+  if (!ticketExists) {
+    db.prepare(`
+      INSERT OR IGNORE INTO tickets (id, title, description, category, priority, status)
+      VALUES (?, 'Ticket ' || ?, 'Synchronized for ticket message context', 'Other', 'Medium', 'Open')
+    `).run(ticketId, ticketId);
+  }
   const stmt = db.prepare(`
     INSERT INTO ticket_messages (ticket_id, sender, message, is_fallback)
     VALUES (?, ?, ?, ?)

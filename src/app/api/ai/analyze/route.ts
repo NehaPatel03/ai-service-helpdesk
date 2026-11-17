@@ -37,7 +37,7 @@ export async function POST(request: Request) {
             priority: ticket.priority
           }
         }),
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(60000)
       });
 
       if (aiResponse.ok) {

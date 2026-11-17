@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getTicketById, getTicketMessages, clearTicketMessages } from '@/lib/db';
+import { isPostgresAvailable, pgGetTicketById } from '@/lib/postgres';
 import { processTicketChat } from '@/lib/chat';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,8 @@ export async function GET(request: Request) {
       );
     }
 
-    const ticket = getTicketById(ticketId);
+    const usePg = await isPostgresAvailable();
+    const ticket = usePg ? await pgGetTicketById(ticketId) : getTicketById(ticketId);
     if (!ticket) {
       return NextResponse.json(
         { success: false, error: 'Ticket not found' },
@@ -66,7 +68,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const ticket = getTicketById(ticketId);
+    const usePg = await isPostgresAvailable();
+    const ticket = usePg ? await pgGetTicketById(ticketId) : getTicketById(ticketId);
     if (!ticket) {
       return NextResponse.json(
         { success: false, error: 'Ticket not found' },

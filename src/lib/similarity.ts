@@ -7,6 +7,7 @@ import {
   getTicketEmbedding, 
   saveTicketEmbedding 
 } from './db';
+import { isPostgresAvailable, pgGetTicketById, pgGetAllTickets } from './postgres';
 
 // Vector dimension for mathematical TF-IDF semantic projection
 const VECTOR_DIM = 128;
@@ -165,7 +166,11 @@ export async function generateAndSaveEmbedding(ticket: Ticket): Promise<number[]
 
       const values = (response as any)?.embedding?.values;
       if (Array.isArray(values) && values.length > 0) {
-        saveTicketEmbedding(ticket.id, values, contentHash);
+        try {
+          saveTicketEmbedding(ticket.id, values, contentHash);
+        } catch {
+          // Ignore foreign key failures on legacy SQLite cache for PostgreSQL tickets
+        }
         return values;
       }
     } catch (err: any) {
@@ -175,7 +180,11 @@ export async function generateAndSaveEmbedding(ticket: Ticket): Promise<number[]
 
   // Fallback to high-precision semantic feature vector
   const fallbackVector = createDeterministicSemanticVector(textToEmbed);
-  saveTicketEmbedding(ticket.id, fallbackVector, contentHash);
+  try {
+    saveTicketEmbedding(ticket.id, fallbackVector, contentHash);
+  } catch {
+    // Ignore foreign key failures on legacy SQLite cache for PostgreSQL tickets
+  }
   return fallbackVector;
 }
 
@@ -187,13 +196,14 @@ export async function findSimilarIncidents(
   limit: number = 4, 
   threshold: number = 0.25
 ): Promise<SimilarIncident[]> {
-  const currentTicket = getTicketById(ticketId);
+  const usePg = await isPostgresAvailable();
+  const currentTicket = usePg ? await pgGetTicketById(ticketId) : getTicketById(ticketId);
   if (!currentTicket) {
     return [];
   }
 
   const currentEmbedding = await generateAndSaveEmbedding(currentTicket);
-  const allTickets = getAllTickets();
+  const allTickets = usePg ? await pgGetAllTickets() : getAllTickets();
 
   const otherTickets = allTickets.filter(t => t.id !== ticketId);
   const scoredList: SimilarIncident[] = [];

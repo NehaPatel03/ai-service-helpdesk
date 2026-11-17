@@ -19,6 +19,7 @@ from google.genai import types as genai_types
 
 from app.config import settings
 from app.db.connection import check_db_health, get_all_kb_articles, get_db_connection
+from app.agent.agent import run_incident_agent
 from app.rag.pipeline import retrieve_relevant_chunks
 from app.rag.indexer import index_all_articles
 from app.schemas import (
@@ -70,94 +71,42 @@ async def health_check():
 @app.post("/analyze-ticket", response_model=AnalysisResponse)
 async def analyze_ticket(request: AnalyzeTicketRequest):
     """
-    Analyzes an incident ticket and returns structured diagnosis, root cause,
-    suggested solution steps, priority/category recommendations, and relevant runbooks.
+    Analyzes an incident ticket using the Phase 3 Tool-Using Gemini Agent.
+    Executes function calling across search_similar_tickets, search_kb, get_ticket_history,
+    and suggest_assignee, validating grounded references, recording rolling conversation memory,
+    and persisting telemetry logs to PostgreSQL.
     """
     ticket = request.ticket
-    logger.info("Analyzing ticket #%d: '%s' [%s / %s]", ticket.id, ticket.title, ticket.category, ticket.priority)
+    logger.info("Executing Phase 3 AI Agent for Ticket #%d: '%s' [%s / %s]", ticket.id, ticket.title, ticket.category, ticket.priority)
 
-    # 1. Retrieve grounded KB runbooks using Hybrid RAG
-    matched_chunks = []
-    matched_article_ids = []
     try:
-        matched_chunks = retrieve_relevant_chunks(
-            query=f"{ticket.title} {ticket.description}",
-            category=ticket.category,
-            top_k=3,
+        analysis, trace = run_incident_agent(ticket)
+
+        # Build clean numbered remediation guide
+        steps_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(analysis.suggested_steps))
+        if not steps_text:
+            steps_text = "1. Apply standard technical runbook\n2. Verify system recovery"
+
+        return AnalysisResponse(
+            summary=f"Incident Analysis: {analysis.root_cause[:120]}...",
+            suggestedCategory=ticket.category,
+            suggestedPriority=ticket.priority,
+            possibleCause=analysis.root_cause,
+            suggestedSolution=steps_text,
+            relevantArticleIds=analysis.kb_sources,
+            keyTroubleshootingSteps=analysis.suggested_steps or ["Inspect service logs", "Execute diagnostic checklist"],
+            confidence=analysis.confidence,
+            engine="gemini_agent" if not trace.used_fallback else "heuristic_fallback",
+            root_cause=analysis.root_cause,
+            suggested_steps=analysis.suggested_steps,
+            related_ticket_ids=analysis.related_ticket_ids,
+            kb_sources=analysis.kb_sources,
+            steps_count=trace.steps_count,
+            grounding_valid=trace.grounding.is_valid,
         )
-        matched_article_ids = list(dict.fromkeys([c.article_id for c in matched_chunks]))
-    except Exception as ret_err:
-        logger.warning("RAG retrieval before analysis failed: %s", ret_err)
-
-    # 2. Try Gemini generation if API key is present
-    if settings.GEMINI_API_KEY:
-        try:
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            models_to_try = [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
-
-            runbooks_text = "\n\n".join(
-                [f"--- Runbook #{c.article_id}: {c.article_title} ---\n{c.content}" for c in matched_chunks]
-            ) if matched_chunks else "No specific runbook matched."
-
-            default_article_ids = matched_article_ids if matched_article_ids else [1, 2]
-
-            system_prompt = f"""You are the senior IT Service Desk AI Engineer at DigiPlus.
-Analyze the following technical support ticket and provide an actionable diagnosis and structured resolution. Ground your diagnosis and troubleshooting steps on the retrieved runbooks where applicable.
-
-Ticket to Analyze:
-- Title: {ticket.title}
-- Description: {ticket.description}
-- Category: {ticket.category}
-- Priority: {ticket.priority}
-
-Relevant Knowledge Base Runbooks:
-{runbooks_text}
-
-Respond ONLY with valid JSON in this exact structure:
-{{
-  "summary": "Professional 1-2 sentence executive summary of the incident",
-  "suggestedCategory": "{ticket.category}",
-  "suggestedPriority": "{ticket.priority}",
-  "possibleCause": "Detailed technical root cause explanation",
-  "suggestedSolution": "Step 1: ...\\nStep 2: ...\\nStep 3: ...",
-  "relevantArticleIds": {default_article_ids},
-  "keyTroubleshootingSteps": ["Action step 1", "Action step 2", "Action step 3"],
-  "confidence": "high"
-}}"""
-
-            for model_name in models_to_try:
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=system_prompt,
-                        config=genai_types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            temperature=0.2,
-                        ),
-                    )
-                    text = response.text or ""
-                    cleaned = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
-                    cleaned = re.sub(r"\s*```$", "", cleaned).strip()
-                    parsed = json.loads(cleaned)
-
-                    return AnalysisResponse(
-                        summary=parsed.get("summary", f"Incident regarding {ticket.title}"),
-                        suggestedCategory=parsed.get("suggestedCategory", ticket.category),
-                        suggestedPriority=parsed.get("suggestedPriority", ticket.priority),
-                        possibleCause=parsed.get("possibleCause", "Underlying service failure or configuration error."),
-                        suggestedSolution=parsed.get("suggestedSolution", "1. Verify logs\n2. Apply runbook\n3. Confirm fix"),
-                        relevantArticleIds=parsed.get("relevantArticleIds") or matched_article_ids or [1, 2],
-                        keyTroubleshootingSteps=parsed.get("keyTroubleshootingSteps", ["Inspect error logs", "Verify service connectivity", "Apply standard runbook"]),
-                        confidence=parsed.get("confidence", "high"),
-                        engine="gemini",
-                    )
-                except Exception as model_err:
-                    logger.warning("Attempt with model %s failed: %s", model_name, model_err)
-        except Exception as e:
-            logger.error("Gemini client initialization failed: %s", e)
-
-    # 2. Intelligent, context-grounded fallback when no API key is present
-    return generate_fallback_analysis(ticket)
+    except Exception as e:
+        logger.error("Error running Phase 3 incident agent: %s", e, exc_info=True)
+        return generate_fallback_analysis(ticket)
 
 
 def generate_fallback_analysis(ticket: TicketInput) -> AnalysisResponse:

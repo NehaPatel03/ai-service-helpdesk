@@ -2,7 +2,7 @@
 Pydantic Request and Response Schemas for DigiPlus AI Service.
 """
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -42,7 +42,16 @@ class AnalysisResponse(BaseModel):
     relevantArticleIds: List[int] = Field(default_factory=list)
     keyTroubleshootingSteps: List[str] = Field(default_factory=list)
     confidence: Literal["low", "medium", "high"] = "high"
-    engine: Literal["gemini", "heuristic_fallback"] = "gemini"
+    engine: str = "gemini_agent"
+
+    # Phase 3 Structured Output Fields
+    root_cause: Optional[str] = None
+    suggested_steps: List[str] = Field(default_factory=list)
+    related_ticket_ids: List[int] = Field(default_factory=list)
+    kb_sources: List[int] = Field(default_factory=list)
+    steps_count: Optional[int] = None
+    grounding_valid: Optional[bool] = None
+    agent_run_id: Optional[int] = None
 
 
 # ==============================================================================

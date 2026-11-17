@@ -6,6 +6,7 @@ import {
   saveTicketMessage, 
   findRelevantKBArticles 
 } from './db';
+import { isPostgresAvailable, pgGetTicketById, pgGetRelevantKBArticles } from './postgres';
 import { findSimilarIncidents } from './similarity';
 
 export async function processTicketChat(
@@ -15,7 +16,8 @@ export async function processTicketChat(
   userMessage: TicketChatMessage; 
   assistantMessage: TicketChatMessage 
 }> {
-  const ticket = getTicketById(ticketId);
+  const usePg = await isPostgresAvailable();
+  const ticket = usePg ? await pgGetTicketById(ticketId) : getTicketById(ticketId);
   if (!ticket) {
     throw new Error(`Ticket #${ticketId} not found.`);
   }
@@ -25,11 +27,17 @@ export async function processTicketChat(
 
   // 2. Gather full incident context
   const previousMessages = getTicketMessages(ticketId).filter(m => m.id !== userMessage.id);
-  const relevantArticles = findRelevantKBArticles(
-    ticket.title, 
-    ticket.description, 
-    ticket.ai_suggested_category || ticket.category
-  );
+  const relevantArticles = usePg
+    ? await pgGetRelevantKBArticles(
+        ticket.title, 
+        ticket.description, 
+        ticket.ai_suggested_category || ticket.category
+      )
+    : findRelevantKBArticles(
+        ticket.title, 
+        ticket.description, 
+        ticket.ai_suggested_category || ticket.category
+      );
   const similarIncidents = await findSimilarIncidents(ticket.id, 3);
 
   // 3. Try Gemini generation with full context
