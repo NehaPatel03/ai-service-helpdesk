@@ -18,8 +18,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Ticket not found' }, { status: 404 });
     }
 
-    // Perform AI analysis
-    const analysis = await analyzeTicketWithAI(ticket);
+    // Call FastAPI AI service if available, with resilient local fallback
+    const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000';
+    let analysis;
+
+    try {
+      const aiResponse = await fetch(`${aiServiceUrl}/analyze-ticket`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticket: {
+            id: ticket.id,
+            title: ticket.title,
+            description: ticket.description,
+            category: ticket.category,
+            priority: ticket.priority
+          }
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+
+      if (aiResponse.ok) {
+        analysis = await aiResponse.json();
+      } else {
+        throw new Error(`AI service returned HTTP ${aiResponse.status}`);
+      }
+    } catch (aiErr) {
+      console.warn('FastAPI AI Service unavailable, using internal diagnostic fallback:', aiErr);
+      analysis = await analyzeTicketWithAI(ticket);
+    }
 
     // Save AI insights to the ticket record
     const updatedTicket = updateTicket(ticket.id, {

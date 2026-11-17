@@ -1,0 +1,60 @@
+services:
+  # 1. PostgreSQL Database with pgvector extension
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: digiplus-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: support_desk
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d support_desk"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Python FastAPI AI Service (Tool-Using Agent & Hybrid Retrieval)
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: digiplus-ai-service
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/support_desk
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      EMBED_MODEL: ${EMBED_MODEL:-text-embedding-004}
+      EMBED_DIM: 768
+      AI_SERVICE_URL: http://localhost:8000
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # 3. Next.js Full-Stack Web Application (Frontend & BFF)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: digiplus-web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/support_desk
+      AI_SERVICE_URL: http://ai-service:8000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      - ai-service
+
+volumes:
+  postgres_data:
