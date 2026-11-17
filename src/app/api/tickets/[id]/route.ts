@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getTicketById, updateTicket, deleteTicket } from '@/lib/db';
-import { isPostgresAvailable, pgGetTicketById, pgUpdateTicket } from '@/lib/postgres';
+import { isPostgresAvailable, pgGetTicketById, pgUpdateTicket, pgDeleteTicket } from '@/lib/postgres';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,7 +77,12 @@ export async function DELETE(
       return NextResponse.json({ success: false, error: 'Invalid ticket ID.' }, { status: 400 });
     }
 
-    const success = deleteTicket(ticketId);
+    let success = false;
+    if (await isPostgresAvailable()) {
+      success = await pgDeleteTicket(ticketId);
+    } else {
+      success = deleteTicket(ticketId);
+    }
     if (!success) {
       return NextResponse.json({ success: false, error: 'Ticket not found.' }, { status: 404 });
     }

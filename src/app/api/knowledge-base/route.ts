@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAllKBArticles, findRelevantKBArticles } from '@/lib/db';
+import { isPostgresAvailable, pgGetAllKBArticles, pgGetRelevantKBArticles } from '@/lib/postgres';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,12 +12,18 @@ export async function GET(request: Request) {
     const ticketTitle = searchParams.get('ticketTitle') || undefined;
     const ticketDesc = searchParams.get('ticketDesc') || undefined;
 
+    const usePg = await isPostgresAvailable();
+
     if (ticketTitle || ticketDesc) {
-      const relevant = findRelevantKBArticles(ticketTitle || '', ticketDesc || '', category);
+      const relevant = usePg
+        ? await pgGetRelevantKBArticles(ticketTitle || '', ticketDesc || '', category)
+        : findRelevantKBArticles(ticketTitle || '', ticketDesc || '', category);
       return NextResponse.json({ success: true, data: relevant });
     }
 
-    const articles = getAllKBArticles(search, category);
+    const articles = usePg
+      ? await pgGetAllKBArticles()
+      : getAllKBArticles(search, category);
     return NextResponse.json({ success: true, count: articles.length, data: articles });
   } catch (error: any) {
     console.error('Failed to get knowledge base articles:', error);

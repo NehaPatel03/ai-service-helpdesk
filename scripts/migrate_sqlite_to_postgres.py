@@ -70,12 +70,34 @@ def migrate_data(
     # 2. Connect to PostgreSQL
     try:
         import psycopg2
+        import urllib.parse
         from psycopg2.extras import execute_batch
     except ImportError:
         raise ImportError("psycopg2-binary is required. Run: pip install psycopg2-binary")
 
     print(f"🔌 Connecting to PostgreSQL...")
-    pg_conn = psycopg2.connect(pg_url)
+    try:
+        pg_conn = psycopg2.connect(pg_url)
+    except Exception as initial_err:
+        try:
+            import dns.resolver
+            parsed = urllib.parse.urlparse(pg_url)
+            res = dns.resolver.Resolver()
+            res.nameservers = ["8.8.8.8", "1.1.1.1"]
+            answers = res.resolve(parsed.hostname, "A")
+            ip = str(answers[0])
+            pg_conn = psycopg2.connect(
+                host=parsed.hostname,
+                hostaddr=ip,
+                port=parsed.port or 5432,
+                user=parsed.username,
+                password=parsed.password,
+                dbname=parsed.path.lstrip("/"),
+                sslmode="require" if "sslmode" in pg_url else "prefer",
+            )
+        except Exception as retry_err:
+            raise RuntimeError(f"Could not connect to PostgreSQL: {initial_err} (fallback: {retry_err})")
+
     p_cur = pg_conn.cursor()
 
     # 3. Ensure Schema Exists
@@ -147,6 +169,13 @@ def migrate_data(
 
 
 def main():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv('.env.local')
+        load_dotenv('.env')
+    except ImportError:
+        pass
+
     parser = argparse.ArgumentParser(description="Migrate SQLite support desk data to PostgreSQL.")
     parser.add_argument("--sqlite-path", type=Path, default=Path("data/support_desk.db"), help="Path to SQLite database.")
     parser.add_argument("--pg-url", type=str, default=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/support_desk"), help="PostgreSQL connection URL.")

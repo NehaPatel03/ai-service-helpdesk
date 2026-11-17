@@ -26,7 +26,7 @@ def test_health_check_endpoint():
 
     assert data["status"] == "ok"
     assert data["embed_dim"] == 768
-    assert data["embed_model"] == "text-embedding-004"
+    assert data["embed_model"] == settings.EMBED_MODEL
     assert "version" in data
     assert "database" in data
 
@@ -132,4 +132,4 @@ def test_index_endpoint():
 def test_config_constants():
     """Verify embedding dimension constant EMBED_DIM is 768 matching Gemini text-embedding-004."""
     assert settings.EMBED_DIM == 768
-    assert settings.EMBED_MODEL == "text-embedding-004"
+    assert settings.EMBED_MODEL in ["text-embedding-004", "gemini-embedding-001", "gemini-embedding-2"]

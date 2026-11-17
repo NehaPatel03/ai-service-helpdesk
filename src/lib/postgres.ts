@@ -1,35 +1,96 @@
 import { Pool } from 'pg';
+import dns from 'dns';
 import { Ticket, TicketStatus, TicketPriority, TicketCategory, KnowledgeArticle, DashboardStats } from './types';
 
 declare global {
   // eslint-disable-next-line no-var
   var _pg_pool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var _pg_pool_promise: Promise<Pool> | undefined;
 }
 
-const pgUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/support_desk';
+const rawDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/support_desk';
 
-export function getPgPool(): Pool {
-  if (!globalThis._pg_pool) {
-    globalThis._pg_pool = new Pool({
-      connectionString: pgUrl,
-      connectionTimeoutMillis: 3000,
-      idleTimeoutMillis: 10000,
-      max: 10
-    });
-
-    globalThis._pg_pool.on('error', (err) => {
-      console.warn('PostgreSQL client pool idle error:', err.message);
-    });
+/**
+ * Resolves a hostname via Google Public DNS (8.8.8.8) to handle environments
+ * where the local router/ISP DNS refuses cloud subdomains.
+ */
+async function resolveHostIp(hostname: string): Promise<string> {
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || /^[\d.]+$/.test(hostname)) {
+    return hostname;
   }
-  return globalThis._pg_pool;
+  return new Promise((resolve) => {
+    try {
+      const resolver = new dns.Resolver();
+      resolver.setServers(['8.8.8.8', '1.1.1.1']);
+      resolver.resolve4(hostname, (err, addrs) => {
+        if (err || !addrs || addrs.length === 0) {
+          resolve(hostname);
+        } else {
+          resolve(addrs[0]);
+        }
+      });
+    } catch {
+      resolve(hostname);
+    }
+  });
+}
+
+export async function getPgPool(): Promise<Pool> {
+  if (globalThis._pg_pool) {
+    return globalThis._pg_pool;
+  }
+
+  if (!globalThis._pg_pool_promise) {
+    globalThis._pg_pool_promise = (async () => {
+      try {
+        const parsed = new URL(rawDbUrl);
+        const hostname = parsed.hostname;
+        const resolvedIp = await resolveHostIp(hostname);
+        const port = parseInt(parsed.port || '5432', 10);
+        const username = parsed.username;
+        const password = decodeURIComponent(parsed.password || '');
+        const database = parsed.pathname.replace(/^\//, '');
+        const isSsl = rawDbUrl.includes('sslmode=') || !['localhost', '127.0.0.1'].includes(hostname);
+
+        const pool = new Pool({
+          host: resolvedIp,
+          port,
+          user: username,
+          password,
+          database,
+          ssl: isSsl ? {
+            rejectUnauthorized: false,
+            servername: hostname // SNI header required by Neon/cloud proxies
+          } : undefined,
+          connectionTimeoutMillis: 5000,
+          idleTimeoutMillis: 10000,
+          max: 10
+        });
+
+        pool.on('error', (err) => {
+          console.warn('PostgreSQL pool background error:', err.message);
+        });
+
+        globalThis._pg_pool = pool;
+        return pool;
+      } catch (err: any) {
+        console.error('Failed to create PostgreSQL pool:', err.message);
+        throw err;
+      }
+    })();
+  }
+
+  return globalThis._pg_pool_promise;
 }
 
 export async function isPostgresAvailable(): Promise<boolean> {
   try {
-    const pool = getPgPool();
+    const pool = await getPgPool();
     const res = await pool.query('SELECT 1;');
     return (res.rowCount ?? 0) > 0;
-  } catch {
+  } catch (err: any) {
+    console.warn('PostgreSQL health check failed:', err.message);
     return false;
   }
 }
@@ -40,7 +101,7 @@ export async function pgGetAllTickets(filters?: {
   category?: string;
   search?: string;
 }): Promise<Ticket[]> {
-  const pool = getPgPool();
+  const pool = await getPgPool();
   let query = 'SELECT * FROM tickets WHERE 1=1';
   const values: any[] = [];
   let paramIdx = 1;
@@ -69,7 +130,7 @@ export async function pgGetAllTickets(filters?: {
 }
 
 export async function pgGetTicketById(id: number): Promise<Ticket | null> {
-  const pool = getPgPool();
+  const pool = await getPgPool();
   const res = await pool.query('SELECT * FROM tickets WHERE id = $1;', [id]);
   if (res.rows.length === 0) return null;
   return mapPgTicketRow(res.rows[0]);
@@ -81,7 +142,7 @@ export async function pgCreateTicket(data: {
   priority?: TicketPriority;
   category?: TicketCategory;
 }): Promise<Ticket> {
-  const pool = getPgPool();
+  const pool = await getPgPool();
   const priority = data.priority || 'Medium';
   const category = data.category || 'Other';
 
@@ -98,7 +159,7 @@ export async function pgUpdateTicket(
   id: number,
   fields: Partial<Ticket>
 ): Promise<Ticket | null> {
-  const pool = getPgPool();
+  const pool = await getPgPool();
   const setClauses: string[] = [];
   const values: any[] = [];
   let paramIdx = 1;
@@ -133,6 +194,103 @@ export async function pgUpdateTicket(
   const res = await pool.query(query, values);
   if (res.rows.length === 0) return null;
   return mapPgTicketRow(res.rows[0]);
+}
+
+export async function pgDeleteTicket(id: number): Promise<boolean> {
+  const pool = await getPgPool();
+  const res = await pool.query('DELETE FROM tickets WHERE id = $1;', [id]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function pgGetDashboardStats(): Promise<any> {
+  const pool = await getPgPool();
+  const totalRes = await pool.query('SELECT COUNT(*) as count FROM tickets');
+  const openRes = await pool.query("SELECT COUNT(*) as count FROM tickets WHERE status = 'Open'");
+  const inProgRes = await pool.query("SELECT COUNT(*) as count FROM tickets WHERE status = 'In Progress'");
+  const resolvedRes = await pool.query("SELECT COUNT(*) as count FROM tickets WHERE status = 'Resolved'");
+  const closedRes = await pool.query("SELECT COUNT(*) as count FROM tickets WHERE status = 'Closed'");
+  const recentRes = await pool.query('SELECT * FROM tickets ORDER BY id DESC LIMIT 6');
+  const priorityRes = await pool.query('SELECT priority, COUNT(*) as count FROM tickets GROUP BY priority');
+  const categoryRes = await pool.query('SELECT category, COUNT(*) as count FROM tickets GROUP BY category');
+
+  return {
+    totalTickets: parseInt(totalRes.rows[0].count, 10),
+    openTickets: parseInt(openRes.rows[0].count, 10),
+    inProgressTickets: parseInt(inProgRes.rows[0].count, 10),
+    resolvedTickets: parseInt(resolvedRes.rows[0].count, 10),
+    closedTickets: parseInt(closedRes.rows[0].count, 10),
+    recentTickets: recentRes.rows.map(mapPgTicketRow),
+    priorityBreakdown: priorityRes.rows.map(r => ({ priority: r.priority, count: parseInt(r.count, 10) })),
+    categoryBreakdown: categoryRes.rows.map(r => ({ category: r.category, count: parseInt(r.count, 10) }))
+  };
+}
+
+export async function pgGetAllKBArticles(): Promise<KnowledgeArticle[]> {
+  const pool = await getPgPool();
+  const res = await pool.query('SELECT id, title, body as content, category, created_at FROM kb_articles ORDER BY id ASC;');
+  return res.rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    category: r.category as TicketCategory,
+    summary: r.content.slice(0, 150) + '...',
+    content: r.content,
+    tags: [],
+    created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
+  }));
+}
+
+export async function pgGetRelevantKBArticles(
+  title: string,
+  description: string,
+  category?: string,
+  limit: number = 3
+): Promise<KnowledgeArticle[]> {
+  const pool = await getPgPool();
+  const query = `${title} ${description}`.trim();
+  
+  try {
+    let sql = `
+      SELECT id, title, body as content, category, created_at
+      FROM kb_articles
+      WHERE (title ILIKE $1 OR body ILIKE $1
+    `;
+    const params: any[] = [`%${query.split(' ')[0]}%`];
+    
+    if (category) {
+      sql += ` OR category ILIKE $2) ORDER BY CASE WHEN category ILIKE $2 THEN 0 ELSE 1 END, id ASC LIMIT $3;`;
+      params.push(`%${category}%`, limit);
+    } else {
+      sql += `) ORDER BY id ASC LIMIT $2;`;
+      params.push(limit);
+    }
+
+    const res = await pool.query(sql, params);
+    if (res.rows.length > 0) {
+      return res.rows.map(r => ({
+        id: r.id,
+        title: r.title,
+        category: r.category as TicketCategory,
+        summary: r.content.slice(0, 150) + '...',
+        content: r.content,
+        tags: [],
+        created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
+      }));
+    }
+  } catch (err) {
+    console.warn('Postgres KB search fallback to basic query:', err);
+  }
+
+  // Fallback to top KB articles
+  const fallbackRes = await pool.query('SELECT id, title, body as content, category, created_at FROM kb_articles ORDER BY id ASC LIMIT $1;', [limit]);
+  return fallbackRes.rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    category: r.category as TicketCategory,
+    summary: r.content.slice(0, 150) + '...',
+    content: r.content,
+    tags: [],
+    created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
+  }));
 }
 
 function mapPgTicketRow(row: any): Ticket {

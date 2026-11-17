@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getTicketById, updateTicket, findRelevantKBArticles } from '@/lib/db';
+import { isPostgresAvailable, pgGetTicketById, pgUpdateTicket, pgGetRelevantKBArticles } from '@/lib/postgres';
 import { analyzeTicketWithAI } from '@/lib/ai';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'ticketId is required' }, { status: 400 });
     }
 
-    const ticket = getTicketById(Number(ticketId));
+    const usePg = await isPostgresAvailable();
+    const ticket = usePg ? await pgGetTicketById(Number(ticketId)) : getTicketById(Number(ticketId));
     if (!ticket) {
       return NextResponse.json({ success: false, error: 'Ticket not found' }, { status: 404 });
     }
@@ -35,7 +37,7 @@ export async function POST(request: Request) {
             priority: ticket.priority
           }
         }),
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(15000)
       });
 
       if (aiResponse.ok) {
@@ -49,20 +51,30 @@ export async function POST(request: Request) {
     }
 
     // Save AI insights to the ticket record
-    const updatedTicket = updateTicket(ticket.id, {
-      ai_summary: analysis.summary,
-      ai_cause: analysis.possibleCause,
-      ai_solution: analysis.suggestedSolution,
-      ai_suggested_category: analysis.suggestedCategory,
-      ai_suggested_priority: analysis.suggestedPriority
-    });
+    const updatedTicket = usePg 
+      ? await pgUpdateTicket(ticket.id, {
+          ai_summary: analysis.summary,
+          ai_cause: analysis.possibleCause,
+          ai_solution: analysis.suggestedSolution,
+          ai_suggested_category: analysis.suggestedCategory,
+          ai_suggested_priority: analysis.suggestedPriority
+        })
+      : updateTicket(ticket.id, {
+          ai_summary: analysis.summary,
+          ai_cause: analysis.possibleCause,
+          ai_solution: analysis.suggestedSolution,
+          ai_suggested_category: analysis.suggestedCategory,
+          ai_suggested_priority: analysis.suggestedPriority
+        });
 
     // Find relevant knowledge base articles
-    const matchedArticles = findRelevantKBArticles(
-      ticket.title,
-      ticket.description,
-      analysis.suggestedCategory || ticket.category
-    );
+    const matchedArticles = usePg
+      ? await pgGetRelevantKBArticles(ticket.title, ticket.description, analysis.suggestedCategory || ticket.category)
+      : findRelevantKBArticles(
+          ticket.title,
+          ticket.description,
+          analysis.suggestedCategory || ticket.category
+        );
 
     return NextResponse.json({
       success: true,

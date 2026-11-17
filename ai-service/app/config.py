@@ -26,8 +26,8 @@ class Settings(BaseSettings):
 
     # Gemini & Embedding Model Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "text-embedding-004")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "gemini-embedding-001")
     EMBED_DIM: int = 768  # Single constant pinned to match pgvector schema
 
     # AI Service Configuration

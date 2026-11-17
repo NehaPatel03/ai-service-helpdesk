@@ -34,7 +34,10 @@ yarn-error.log*
 .env*
 !.env.example
 
-# vercel
+# Database backups
+*.backup
+*.db-wal
+*.db-shm
 .vercel
 
 # typescript

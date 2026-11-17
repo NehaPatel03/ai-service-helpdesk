@@ -78,7 +78,7 @@ async def analyze_ticket(request: AnalyzeTicketRequest):
     if settings.GEMINI_API_KEY:
         try:
             client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            models_to_try = [settings.GEMINI_MODEL, "gemini-2.0-flash", "gemini-1.5-flash"]
+            models_to_try = [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
 
             system_prompt = f"""You are the senior IT Service Desk AI Engineer at DigiPlus.
 Analyze the following technical support ticket and provide an actionable diagnosis and structured resolution.
