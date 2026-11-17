@@ -42,6 +42,7 @@ class AnalysisResponse(BaseModel):
     relevantArticleIds: List[int] = Field(default_factory=list)
     keyTroubleshootingSteps: List[str] = Field(default_factory=list)
     confidence: Literal["low", "medium", "high"] = "high"
+    engine: Literal["gemini", "heuristic_fallback"] = "gemini"
 
 
 # ==============================================================================

@@ -125,6 +125,7 @@ Respond ONLY with valid JSON in this exact structure:
                         relevantArticleIds=parsed.get("relevantArticleIds", []),
                         keyTroubleshootingSteps=parsed.get("keyTroubleshootingSteps", ["Inspect error logs", "Verify service connectivity", "Apply standard runbook"]),
                         confidence=parsed.get("confidence", "high"),
+                        engine="gemini",
                     )
                 except Exception as model_err:
                     logger.warning("Attempt with model %s failed: %s", model_name, model_err)
@@ -153,6 +154,7 @@ def generate_fallback_analysis(ticket: TicketInput) -> AnalysisResponse:
                 "Switch client gateway selection to secondary failover gateway"
             ],
             confidence="high",
+            engine="heuristic_fallback",
         )
     elif "postgres" in title_lower or "rds" in title_lower or "connection pool" in title_lower or "deadlock" in title_lower:
         return AnalysisResponse(
@@ -168,6 +170,7 @@ def generate_fallback_analysis(ticket: TicketInput) -> AnalysisResponse:
                 "Check CloudWatch DatabaseConnections metric over the past 2 hours"
             ],
             confidence="high",
+            engine="heuristic_fallback",
         )
     elif "dns" in title_lower or "nxdomain" in title_lower or "servfail" in title_lower:
         return AnalysisResponse(
@@ -183,6 +186,7 @@ def generate_fallback_analysis(ticket: TicketInput) -> AnalysisResponse:
                 "Restart named or Windows DNS server service"
             ],
             confidence="high",
+            engine="heuristic_fallback",
         )
     elif "lockout" in title_lower or "badpwdcount" in title_lower or "password" in title_lower:
         return AnalysisResponse(
@@ -198,6 +202,7 @@ def generate_fallback_analysis(ticket: TicketInput) -> AnalysisResponse:
                 "Unlock account in Active Directory Users and Computers"
             ],
             confidence="high",
+            engine="heuristic_fallback",
         )
     else:
         return AnalysisResponse(
@@ -213,6 +218,7 @@ def generate_fallback_analysis(ticket: TicketInput) -> AnalysisResponse:
                 "Apply standard remediation runbook and verify resolution"
             ],
             confidence="medium",
+            engine="heuristic_fallback",
         )
 
 
