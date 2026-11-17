@@ -1,12 +1,36 @@
 # DigiPlus AI-Powered Service Desk 🤖🎫
 
-A production-grade, full-stack IT Service Desk and automated incident remediation system upgraded with **Neon Serverless PostgreSQL**, **`pgvector` dense vector embeddings**, **PostgreSQL full-text search**, a **FastAPI AI microservice**, and **Google Gemini (Generative AI & Embeddings)**.
+[![Next.js](https://img.shields.io/badge/Next.js-16.0-black?style=flat&logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19.0-blue?style=flat&logo=react)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.7-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
+[![pgvector](https://img.shields.io/badge/pgvector-0.8.7-336791?style=flat)](https://github.com/pgvector/pgvector)
+[![Google Gemini](https://img.shields.io/badge/Google_Gemini-3.5_Flash_Lite-4285F4?style=flat&logo=google)](https://ai.google.dev/)
+[![Tests](https://img.shields.io/badge/Tests-35%2F35_Passing-brightgreen?style=flat)](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/tests)
 
-The system empowers IT support engineers by triaging natural language incidents, calculating automated root-cause diagnostics, searching runbooks with **Hybrid RAG (Dense Vector + Full-Text + RRF + Neural Reranking)**, and tracking the complete incident resolution lifecycle.
+A production-grade, enterprise IT Service Desk and automated incident remediation system upgraded with **Neon Serverless PostgreSQL**, **`pgvector` dense vector embeddings**, **PostgreSQL full-text search**, a **FastAPI AI microservice**, and **Google Gemini (Generative AI & Embeddings)**.
+
+The system triages natural language incidents, calculates automated root-cause diagnostics, retrieves technical runbooks with **Hybrid RAG (Dense Vector + Full-Text + RRF + Neural Reranking)**, and tracks the complete incident resolution lifecycle.
 
 ---
 
-## 🌟 Upgraded Architecture Overview
+## 📑 Table of Contents
+- [Upgraded Architecture](#-upgraded-architecture)
+- [Project Directory Structure](#-project-directory-structure)
+- [Implementation Progress](#-implementation-progress)
+  - [Phase 0: Synthetic Datasets & Golden Benchmark](#phase-0-synthetic-datasets--golden-benchmark)
+  - [Phase 1: Neon PostgreSQL, pgvector & FastAPI](#phase-1-neon-postgresql-pgvector--fastapi)
+  - [Phase 2: Hybrid Retrieval (Hybrid RAG) Engine](#phase-2-hybrid-retrieval-hybrid-rag-engine)
+- [API Endpoints Reference](#-api-endpoints-reference)
+- [Environment Configuration](#-environment-configuration)
+- [Step-by-Step Setup & Execution](#-step-by-step-setup--execution)
+- [Automated Testing & Verification](#-automated-testing--verification)
+- [Security & Resilience](#-security--resilience)
+- [Upcoming Roadmap (Phase 3 & 4)](#-upcoming-roadmap)
+
+---
+
+## 🌟 Upgraded Architecture
 
 ```
                       +-----------------------------------+
@@ -15,7 +39,7 @@ The system empowers IT support engineers by triaging natural language incidents,
                       +--------+-----------------+--------+
                                |                 |
                    Next.js API |                 | Fast REST Calls
-                      Routes   |                 |
+                      Routes   |                 | (15s resilient timeout)
                                v                 v
             +--------------------+    +----------------------+
             | Neon PostgreSQL    |    | FastAPI AI Service   |
@@ -25,7 +49,7 @@ The system empowers IT support engineers by triaging natural language incidents,
             | - pgvector (768d)  |    | - Index: /index      |
             | - GIN tsvector     |    +----------+-----------+
             +--------------------+               |
-                                                 | google-genai
+                                                 | google-genai SDK
                                                  v
                                       +----------------------+
                                       | Google Gemini API    |
@@ -35,7 +59,7 @@ The system empowers IT support engineers by triaging natural language incidents,
 ```
 
 ### Technology Stack
-- **Frontend & Full-Stack Gateway:** Next.js (App Router), React, TypeScript strict mode, Tailwind CSS.
+- **Frontend & Web Gateway:** Next.js (App Router), React, TypeScript strict mode, Tailwind CSS.
 - **AI Microservice:** Python 3.12, FastAPI, Uvicorn, Pydantic v2 validation.
 - **Database:** Neon hosted Serverless PostgreSQL 18.7 with native `pgvector` 0.8.7.
 - **Vector Search:** `pgvector` HNSW index with cosine distance (`<=>`).
@@ -46,9 +70,78 @@ The system empowers IT support engineers by triaging natural language incidents,
 
 ---
 
-## 📋 Implementation Progress & Completed Phases
+## 📂 Project Directory Structure
 
-### Phase 0: Synthetic IT Helpdesk Datasets & Evaluation Benchmark
+```
+digiplus-ai-service-desk/
+├── ai-service/                         # Python FastAPI AI Microservice
+│   ├── app/
+│   │   ├── db/
+│   │   │   ├── __init__.py
+│   │   │   └── connection.py           # Resilient Neon connection with DNS fallback
+│   │   ├── rag/
+│   │   │   ├── __init__.py
+│   │   │   ├── chunker.py              # Overlapping Markdown chunking (300-500 tokens)
+│   │   │   ├── embeddings.py           # Gemini gemini-embedding-001 (768d) client
+│   │   │   ├── indexer.py              # Idempotent batch KB chunk & vector indexer
+│   │   │   ├── retriever.py            # Cosine vector search, tsvector search & RRF
+│   │   │   ├── reranker.py             # Gemini neural reranker (Top 20 -> Top 5)
+│   │   │   └── pipeline.py             # Feature-flagged retrieval orchestrator
+│   │   ├── config.py                   # Pydantic v2 BaseSettings & environment loader
+│   │   ├── main.py                     # FastAPI entrypoint (/health, /analyze-ticket, /search, /index)
+│   │   └── schemas.py                  # Pydantic request/response models
+│   ├── tests/
+│   │   ├── test_api.py                 # FastAPI endpoint validation tests
+│   │   ├── test_chunker.py             # Markdown chunking unit tests
+│   │   └── test_rag.py                 # RRF, embedding, and reranker unit tests
+│   ├── Dockerfile
+│   └── requirements.txt                # Python dependencies
+├── data/
+│   ├── seed/
+│   │   ├── kb_articles.jsonl           # 40 canonical technical runbooks across 8 categories
+│   │   └── tickets.jsonl               # 300 historical incident tickets
+│   ├── support_desk.db                 # Preserved original SQLite database
+│   └── support_desk.db.backup          # Byte-for-byte SQLite backup
+├── db/
+│   └── migrations/
+│       └── 001_initial_schema.sql      # PostgreSQL DDL (pgvector, tickets, kb_articles, kb_chunks)
+├── eval/
+│   └── golden_set.jsonl                # 60 held-out evaluation tickets for clean benchmarking
+├── scripts/
+│   ├── generate_seed_data.py           # Synthetic seed dataset generator
+│   ├── index_kb.py                     # CLI script to chunk and embed KB into pgvector
+│   ├── load_seed.py                    # Loader for SQLite / PostgreSQL seed datasets
+│   └── migrate_sqlite_to_postgres.py   # Complete SQLite-to-PostgreSQL migration script
+├── src/                                # Next.js Application Source
+│   ├── app/
+│   │   ├── api/                        # Next.js API Routes (PostgreSQL CRUD)
+│   │   │   ├── knowledge-base/
+│   │   │   ├── stats/
+│   │   │   └── tickets/
+│   │   ├── knowledge-base/             # Knowledge base browsing UI
+│   │   ├── tickets/                    # Ticket lifecycle management UI
+│   │   ├── layout.tsx
+│   │   └── page.tsx                    # Executive incident dashboard
+│   ├── components/                     # React UI Components
+│   └── lib/
+│       ├── ai.ts                       # Next.js -> FastAPI client with heuristic fallback
+│       ├── db.ts                       # Legacy SQLite client (read-only backup)
+│       ├── postgres.ts                 # Production Neon PostgreSQL client with DNS resilience
+│       └── types.ts                    # Core TypeScript interfaces
+├── tests/
+│   └── test_seed_data.py               # Seed dataset schema and golden set tests
+├── .env.example                        # Template environment variables
+├── .env.local                          # Active local environment variables (git-ignored)
+├── package.json                        # Node.js dependencies and scripts
+├── test-e2e.mjs                        # Full-stack E2E incident lifecycle verification script
+└── README.md
+```
+
+---
+
+## 📋 Implementation Progress
+
+### Phase 0: Synthetic Datasets & Golden Benchmark
 - **`data/seed/kb_articles.jsonl`**: 40 canonical technical runbooks spanning 8 core IT categories (`network`, `email`, `VPN and access`, `hardware`, `software installation`, `account and password`, `database`, `performance`).
 - **`data/seed/tickets.jsonl`**: 300 realistic historical incident tickets with verified resolutions and category mappings.
 - **`eval/golden_set.jsonl`**: 60 held-out evaluation tickets strictly isolated from the searchable index to ensure clean, uncontaminated benchmarking.
@@ -62,14 +155,14 @@ The system empowers IT support engineers by triaging natural language incidents,
 ---
 
 ### Phase 1: Neon PostgreSQL, `pgvector`, FastAPI & SQLite Migration
-- **Neon Hosted Database:** Configured without requiring Docker Desktop, saving host disk space.
-- **pgvector Extension:** Enabled `vector` extension version `0.8.7` on PostgreSQL 18.7.
-- **Database Schema Migration:** [`db/migrations/001_initial_schema.sql`](file:///d:/ai-service-desk/digiplus-ai-service-desk/db/migrations/001_initial_schema.sql) defining `kb_articles`, `kb_chunks`, `tickets`, `agent_runs`, and `feedback`.
-- **Data Migration:** [`scripts/migrate_sqlite_to_postgres.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/scripts/migrate_sqlite_to_postgres.py) migrated existing tickets and KB articles with 100% parity, sequence resets, and SQLite backup preservation (`data/support_desk.db.backup`).
-- **FastAPI AI Microservice:** Implemented in `ai-service/` with endpoints:
-  - `GET /health`: Database connection status, vector extension verification, model constants.
-  - `POST /analyze-ticket`: Structured incident diagnosis, root cause analysis, and remediation steps.
-- **DNS Resilience:** Integrated resilient DNS resolution via `dnspython` and Node.js custom TLS SNI to bypass restrictive local ISP DNS filters.
+- **Neon Hosted Database:** Fully serverless hosted PostgreSQL, bypassing local Docker requirements.
+- **pgvector Extension:** Enabled native `vector` extension (v0.8.7) on PostgreSQL 18.7.
+- **Database Schema Migration:** Applied [`db/migrations/001_initial_schema.sql`](file:///d:/ai-service-desk/digiplus-ai-service-desk/db/migrations/001_initial_schema.sql) defining `kb_articles`, `kb_chunks`, `tickets`, `agent_runs`, and `feedback`.
+- **Data Migration:** [`scripts/migrate_sqlite_to_postgres.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/scripts/migrate_sqlite_to_postgres.py) migrated existing tickets and KB articles with 100% field fidelity, sequence resets, and SQLite backup preservation (`data/support_desk.db.backup`).
+- **FastAPI AI Microservice:** Implemented in `ai-service/app/main.py`:
+  - `GET /health`: Verifies database connectivity, pgvector extension, and configured Gemini models.
+  - `POST /analyze-ticket`: Generates diagnostic root cause analysis and step-by-step remediation via Gemini.
+- **DNS Resilience:** Integrated resilient DNS resolution via `dnspython` and Node.js custom TLS SNI to resolve Neon domains reliably across restrictive local ISP DNS filters.
 
 ---
 
@@ -107,10 +200,10 @@ Combines dense vector embeddings, sparse full-text search, Reciprocal Rank Fusio
 ```
 
 #### 1. Knowledge Base Chunking Strategy ([`ai-service/app/rag/chunker.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/chunker.py))
-- **Chunk Size:** 300–500 tokens (~1200–2000 characters), splitting at natural markdown section and paragraph boundaries.
+- **Chunk Size:** 300–500 tokens (~1200–2000 characters), splitting at natural Markdown section and paragraph boundaries.
 - **Overlap:** 50–100 tokens (~200–400 characters) to preserve technical context across boundary cuts.
 - **Context Grounding:** Every chunk prepends a metadata header `[{category}] {title}` to maximize vector retrieval accuracy.
-- **Idempotency:** Short articles within the target threshold are stored as a single chunk without unnecessary splitting.
+- **Idempotency:** Short articles within the target threshold are preserved as a single chunk without unnecessary splitting.
 
 #### 2. Dense Vector Embeddings ([`ai-service/app/rag/embeddings.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/embeddings.py))
 - **Model:** `gemini-embedding-001` via the official `google-genai` SDK.
@@ -137,7 +230,13 @@ $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{vector}, \text{text}\}} \frac{1.0}{
 - Generates structured relevance scores (0.0 to 1.0) and technical reasoning.
 - **Strict Safeguards:** Drops hallucinated/invented chunk IDs and automatically falls back to RRF candidate order on malformed JSON or API errors.
 
-#### 7. Feature Flag Matrix ([`ai-service/app/rag/pipeline.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/pipeline.py))
+#### 7. Grounded Incident Analysis Integration
+In [`POST /analyze-ticket`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/main.py), top retrieved and reranked runbook chunks are formatted and injected directly into the Gemini prompt:
+- Grounds root cause diagnostics in actual organization runbooks.
+- Cites specific matched runbook titles and categories.
+- Produces actionable, context-aware remediation steps.
+
+#### 8. Feature Flag Matrix ([`ai-service/app/rag/pipeline.py`](file:///d:/ai-service-desk/digiplus-ai-service-desk/ai-service/app/rag/pipeline.py))
 
 | `USE_HYBRID` | `USE_RERANK` | Active Retrieval Pipeline |
 |---|---|---|
@@ -147,9 +246,95 @@ $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{vector}, \text{text}\}} \frac{1.0}{
 
 ---
 
-## ⚙️ Environment Variables Reference
+## 📡 API Endpoints Reference
 
-Configure these in your local `.env.local` file (git-ignored, never committed):
+### AI Microservice (Port 8000)
+
+#### `GET /health`
+Verifies database connectivity, pgvector extension, and configured model settings.
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "vector_extension": "available",
+  "llm_model": "gemini-3.5-flash-lite",
+  "embed_model": "gemini-embedding-001",
+  "embed_dim": 768
+}
+```
+
+#### `GET /search?q={query}&category={category}&limit={limit}`
+Executes hybrid retrieval over knowledge-base runbooks.
+```json
+{
+  "query": "VPN connection timed out error 403",
+  "total": 5,
+  "pipeline": "hybrid_rerank",
+  "results": [
+    {
+      "chunk_id": 14,
+      "article_id": 4,
+      "article_title": "VPN Gateway Troubleshooting & Tunnel Reset",
+      "category": "network",
+      "chunk_index": 0,
+      "content": "[network] VPN Gateway Troubleshooting...",
+      "score": 0.94,
+      "rerank_score": 0.94,
+      "rerank_reason": "Directly matches VPN gateway timeout symptoms and provides reset commands."
+    }
+  ]
+}
+```
+
+#### `POST /analyze-ticket`
+Generates grounded incident diagnostics using Gemini and matching runbooks.
+- **Request:**
+  ```json
+  {
+    "ticket": {
+      "id": 105,
+      "title": "PostgreSQL connection pool exhausted",
+      "description": "API services reporting FATAL: remaining connection slots are reserved",
+      "category": "database",
+      "priority": "P1"
+    }
+  }
+  ```
+- **Response:**
+  ```json
+  {
+    "diagnostic": "PostgreSQL backend client connection pool saturation.",
+    "root_cause": "Unclosed database sessions from long-running batch transactions exceeding max_connections.",
+    "suggested_steps": [
+      "Query pg_stat_activity for idle-in-transaction connections.",
+      "Terminate long-running unpooled queries.",
+      "Increase PgBouncer pool ceiling or restart connection pooling layer."
+    ],
+    "grounded_runbooks": [
+      {
+        "article_title": "PostgreSQL Connection Pooling & Saturation Recovery",
+        "category": "database"
+      }
+    ],
+    "confidence": 0.95
+  }
+  ```
+
+#### `POST /index`
+Triggers full re-chunking and re-embedding of all knowledge-base articles.
+```json
+{
+  "status": "indexed",
+  "articles_indexed": 6,
+  "chunks_created": 6
+}
+```
+
+---
+
+## ⚙️ Environment Configuration
+
+Configure your local `.env.local` file (git-ignored, never committed):
 
 | Variable | Default Value | Description |
 |---|---|---|
@@ -216,7 +401,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🧪 Comprehensive Automated Testing
+## 🧪 Automated Testing & Verification
 
 The project includes an extensive test suite verifying Python services, Next.js type safety, and full-stack incident workflows:
 
@@ -240,8 +425,22 @@ node test-e2e.mjs
 
 ---
 
-## 🔒 Security & Best Practices
+## 🔒 Security & Resilience
 - **No Hardcoded Secrets:** All API keys, database URLs, and passwords reside exclusively in `.env.local` and environment variables.
 - **Git Protection:** `.env*` files (except `.env.example`), `.backup` files, and database binaries are strictly ignored in `.gitignore`.
 - **Hallucination Safeguards:** Gemini reranker strictly verifies returned IDs against input candidate lists; invented IDs are systematically discarded.
 - **Resilient Fallback:** The application maintains 100% operational availability through heuristic fallback layers in the event of external network interruptions.
+- **DNS Resilience:** Both Python and Node.js clients include automatic fallback to public DNS resolvers (`8.8.8.8`) with TLS Server Name Indication (`SNI`) to prevent connection failures caused by local ISP DNS filtering.
+
+---
+
+## 🔮 Upcoming Roadmap
+
+### Phase 3: Tool-Using Autonomous LLM Agent Loop
+- Autonomous incident investigation loop with Gemini Function Calling.
+- Diagnostic tools: Knowledge search, incident history lookup, status updater.
+- `agent_runs` PostgreSQL audit logging with step-by-step reasoning traces.
+
+### Phase 4: Automated Evaluation & Golden Set Benchmarking
+- Automated offline evaluation pipeline evaluating golden set tickets against historical incident resolutions.
+- Retrieval recall metrics (Recall@K, MRR) and LLM diagnostic accuracy scoring.
