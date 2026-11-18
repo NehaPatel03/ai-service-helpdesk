@@ -54,6 +54,25 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    """Root endpoint welcoming visitors and directing to documentation and active endpoints."""
+    return {
+        "service": "DigiPlus AI Microservice",
+        "version": settings.APP_VERSION,
+        "status": "online",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "redoc": "/redoc",
+            "search": "/search",
+            "analyze_ticket": "/analyze-ticket (POST)",
+            "index_kb": "/index (POST)",
+        },
+        "frontend": "http://localhost:3000",
+    }
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint reporting API status, database reachability, and active models."""
